@@ -44,7 +44,7 @@ public class InventarioService {
 
         int nuevoStock = aplicarMovimientoStock(producto, cantidad, tipoMovimiento);
         registrarMovimiento(producto, cantidad, tipoMovimiento, nuevoStock);
-        return generarRespuestaActualizacion(producto, nuevoStock);
+        return evaluarReorden(producto, nuevoStock);
     }
 
     private boolean esMovimientoValido(Long productoId, int cantidad, String tipoMovimiento) {
@@ -88,16 +88,20 @@ public class InventarioService {
         System.out.println(registro);
     }
 
-    private String generarRespuestaActualizacion(Producto producto, int nuevoStock) {
+        private String evaluarReorden(Producto producto, int nuevoStock) {
         int cantidadReorden = calcularCantidadReorden(producto, nuevoStock);
-        if (cantidadReorden > 0) {
-            if (notificador != null) {
-                notificador.notificar(producto, cantidadReorden);
-            }
-            System.out.println("ALERTA: " + producto.getNombre()
-                    + " bajo stock minimo. Reordenar " + cantidadReorden + " unidades.");
-            return "OK_BAJO_STOCK_REORDEN_" + cantidadReorden;
+        if (cantidadReorden == 0) {
+            return "OK_" + nuevoStock;
         }
-        return "OK_" + nuevoStock;
+        alertarBajoStock(producto, cantidadReorden);
+        return "OK_BAJO_STOCK_REORDEN_" + cantidadReorden;
+    }
+
+    private void alertarBajoStock(Producto producto, int cantidadReorden) {
+        if (notificador != null) {
+            notificador.notificar(producto, cantidadReorden);
+        }
+        System.out.println("ALERTA: " + producto.getNombre()
+                + " bajo stock minimo. Reordenar " + cantidadReorden + " unidades.");
     }
 }
