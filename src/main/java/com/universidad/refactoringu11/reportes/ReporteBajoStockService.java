@@ -4,6 +4,7 @@ import com.universidad.refactoringu11.inventario.InventarioService;
 import com.universidad.refactoringu11.inventario.NotificadorBajoStock;
 import com.universidad.refactoringu11.inventario.Producto;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,7 +15,7 @@ public class ReporteBajoStockService implements NotificadorBajoStock {
     private final InventarioService inventarioService;
     private final List<String> alertasRegistradas = new ArrayList<>();
 
-    public ReporteBajoStockService(InventarioService inventarioService) {
+    public ReporteBajoStockService(@Lazy InventarioService inventarioService) {
         this.inventarioService = inventarioService;
     }
 
