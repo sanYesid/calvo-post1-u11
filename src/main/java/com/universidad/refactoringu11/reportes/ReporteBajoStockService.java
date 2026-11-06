@@ -1,35 +1,54 @@
 package com.universidad.refactoringu11.reportes;
 
 import com.universidad.refactoringu11.inventario.InventarioService;
+import com.universidad.refactoringu11.inventario.NotificadorBajoStock;
 import com.universidad.refactoringu11.inventario.Producto;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
-public class ReporteBajoStockService {
+public class ReporteBajoStockService implements NotificadorBajoStock {
 
     private final InventarioService inventarioService;
+    private final List<String> alertasRegistradas = new ArrayList<>();
 
     public ReporteBajoStockService(InventarioService inventarioService) {
         this.inventarioService = inventarioService;
     }
 
+    @Override
+    public void notificar(Producto producto, int cantidadReorden) {
+        String alerta = "ALERTA REPORTE: Producto '" + producto.getNombre()
+                + "' (stock actual: " + producto.getStock()
+                + ", minimo: " + producto.getStockMinimo()
+                + ") -> Reordenar " + cantidadReorden + " unidades.";
+        alertasRegistradas.add(alerta);
+    }
+
     public String generarReporte() {
+        StringBuilder reporte = new StringBuilder("=== REPORTE DE BAJO STOCK ===\n");
         List<Producto> productosBajoMinimo = inventarioService.obtenerProductosBajoStockMinimo();
-        if (productosBajoMinimo.isEmpty()) {
-            return "REPORTE BAJO STOCK: Sin productos en nivel critico.";
-        }
-        StringBuilder sb = new StringBuilder("REPORTE BAJO STOCK:\n");
+
         for (Producto producto : productosBajoMinimo) {
-            sb.append("- ")
-              .append(producto.getNombre())
-              .append(" (stock actual: ")
-              .append(producto.getStock())
-              .append(", minimo: ")
-              .append(producto.getStockMinimo())
-              .append(")\n");
+            reporte.append("- Producto bajo minimo: ")
+                   .append(producto.getNombre())
+                   .append(" (Stock: ")
+                   .append(producto.getStock())
+                   .append(" / Minimo: ")
+                   .append(producto.getStockMinimo())
+                   .append(")\n");
         }
-        return sb.toString().trim();
+
+        for (String alerta : alertasRegistradas) {
+            reporte.append(alerta).append("\n");
+        }
+
+        if (productosBajoMinimo.isEmpty() && alertasRegistradas.isEmpty()) {
+            reporte.append("Sin alertas ni productos bajo stock minimo.");
+        }
+
+        return reporte.toString().trim();
     }
 }
