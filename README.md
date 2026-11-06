@@ -92,3 +92,22 @@ graph LR
     end
 
 ```
+
+### Decisión de Diseño 3: Ubicación de la interfaz `NotificadorBajoStock` en el paquete `inventario` vs. `reportes`
+
+- **Principio aplicado:** Principio de Inversión de Dependencias (*Dependency Inversion Principle* - DIP) y regla de dirección de dependencias entre capas ("los paquetes de infraestructura/soporte dependen de dominio; el dominio nunca depende de infraestructura").
+- **Decisión tomada:** Se ubicó la interfaz `NotificadorBajoStock` dentro del paquete **`com.universidad.refactoringu11.inventario`** (paquete de mayor nivel de abstracción) y no en `com.universidad.refactoringu11.reportes`.
+- **Justificación técnica:**
+  1. **Nivel de abstracción y propiedad del contrato (Ownership):** Entre ambos paquetes, **`inventario` es el paquete de mayor nivel de abstracción** porque encapsula las entidades y reglas esenciales del negocio (`Producto`, `TipoProducto`, control de existencias y cálculo de reorden en `InventarioService`). En cambio, **`reportes` es un módulo consumidor/secundario de menor nivel** encargado de formatear salidas y consolidar reportes a partir del estado del inventario.
+  2. **Por qué colocarla en `reportes` no rompería el ciclo:** Si `NotificadorBajoStock` se declarara dentro de `reportes`, `InventarioService` tendría que seguir escribiendo `import com.universidad.refactoringu11.reportes.NotificadorBajoStock;`. Como en Java la unidad de acoplamiento de paquetes se determina por los tipos importados entre paquetes, `inventario` seguiría dependiendo de `reportes` y `reportes` seguiría dependiendo de `inventario` (porque usa `Producto` e `InventarioService`), manteniendo vivo el ciclo detectado por ArchUnit.
+  3. **Inversión real de la flecha de dependencia:** Al situar `NotificadorBajoStock` en `inventario`, el dominio define el contrato ("necesito notificar cuando un `Producto` entra en bajo stock") sin conocer quién lo implementa. `ReporteBajoStockService` en `reportes` implementa esa interfaz, logrando que todas las flechas de dependencia entre paquetes apunten en una única dirección acíclica: **`reportes -> inventario`**.
+
+  ### Decisión de Diseño 4: Granularidad del método en `NotificadorBajoStock` (Evento individual vs. Notificación por lote)
+
+- **Firma elegida:** `void notificar(Producto producto, int cantidadReorden);` (notificación por evento individual inmediato).
+- **Alternativa analizada:** `void notificar(List<Producto> productosBajoStock);` (notificación acumulada o por lote / batch).
+- **Decisión tomada:** Se seleccionó la **notificación por evento individual puntual** al momento exacto en que la operación de salida o movimiento de stock detecta que las existencias del producto caen por debajo de su umbral mínimo de seguridad.
+- **Justificación técnica:**
+  1. **Reactividad inmediata e intención del dominio (*Domain Events*):** El método `actualizarInventario()` procesa una transacción de stock en tiempo real. Emitir la notificación con el par `(Producto, cantidadReorden)` en el instante en que se cruza el umbral crítico permite que los consumidores (como `ReporteBajoStockService`, un despachador de emails o un webhook de aprovisionamiento) reaccionen inmediatamente al incidente sin esperar la finalización de un ciclo global de inventario.
+  2. **Cohesión y encapsulamiento del contexto transaccional:** La notificación por evento individual traslada exactamente el producto afectado y la cantidad calculada en el flujo actual (`cantidadReorden`), sin obligar al servicio de inventario a escanear reiteradamente toda la base de productos ni forzar al notificador a recalcular cuántas unidades se necesitan pedir.
+  3. **Escenario donde se preferiría una notificación por lote (`List<Producto>`):** La alternativa por lote (`notificar(List<Producto>)` o `notificar(List<OrdenReorden>)`) sería preferible en escenarios de **procesamiento batch o tareas programadas periódicas** (por ejemplo, un job nocturno de cierre diario o una consolidación de compras a proveedores por volumen una vez por semana). En tales casos, acumular y enviar la lista completa en un único mensaje reduce la sobrecarga de I/O de red, amortiza llamadas a servicios externos de compra masiva y evita el problema del "bombardeo de alertas" (*alert fatigue*) que ocurriría si se disparan miles de notificaciones individuales aisladas durante un evento de alta concurrencia de ventas.
