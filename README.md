@@ -2,7 +2,7 @@
 
 **Unidad 11 · Patrones de Diseño de Software**
 **Proyecto:** `refactoring-u11` (`com.universidad.refactoringu11`)
-**Stack:** Java 17 · Spring Boot 3.x · Maven 3.9+ · JUnit 5 · ArchUnit 1.3.0
+**Stack:** Java 17 · Spring Boot 4.1.2 · Maven 3.9+ · JUnit 5 · ArchUnit 1.3.0
 
 > Una sola actividad, dos partes, un único proyecto Maven.
 > **Parte 1:** red de seguridad con pruebas de caracterización y refactorización de dos *code smells* (*Long Method* y *Switch Statements* duplicados).
@@ -43,11 +43,15 @@ refactoring-u11/
     │   │       └── ReporteBajoStockService.java   ← implementa NotificadorBajoStock
     │   └── resources/application.properties
     └── test/java/com/universidad/refactoringu11/
-        ├── ArquitecturaPaquetesTest.java          ← prueba ArchUnit (Parte 2)
-        └── inventario/
-            ├── ClasificadorProductoTest.java
-            ├── EtiquetadoProductoTest.java
-            └── InventarioServiceTest.java
+        ├── ArquitecturaPaquetesTest.java              ← pruebas ArchUnit (Parte 2)
+        ├── RefactoringU11ApplicationTests.java        ← carga del contexto de Spring
+        ├── NotificacionBajoStockIntegracionTest.java  ← integración inventario → reportes
+        ├── inventario/
+        │   ├── ClasificadorProductoTest.java
+        │   ├── EtiquetadoProductoTest.java
+        │   └── InventarioServiceTest.java
+        └── reportes/
+            └── ReporteBajoStockServiceTest.java
 ```
 
 ## 2. Cómo ejecutar
@@ -55,7 +59,7 @@ refactoring-u11/
 ```bash
 mvn compile                                   # compilación
 mvn test                                      # suite completa
-mvn test -Dtest=ArquitecturaPaquetesTest      # solo la prueba de arquitectura
+mvn test -Dtest=ArquitecturaPaquetesTest      # solo las pruebas de arquitectura
 ```
 
 ---
@@ -89,13 +93,13 @@ Se escribieron y ejecutaron **antes de modificar** cualquier clase de producció
 
 ![mvn test sobre el código original](capturas/04-paso2-mvn-test-antes.png)
 
-> **Nota sobre el conteo:** en las ejecuciones de la Parte 1 Maven reporta **15** tests: las 14 pruebas anteriores más `RefactoringU11ApplicationTests` (1 test de carga de contexto generado por Spring Initializr). Desde la Parte 2 (capturas 12 a 18) ese test ya no figura en el árbol de pruebas.
+> **Nota sobre el conteo:** en las ejecuciones de la Parte 1 Maven reporta **15** tests: las 14 pruebas de caracterización más `RefactoringU11ApplicationTests` (1 test de carga de contexto generado por Spring Initializr). Lo que pasó con ese test en la Parte 2 se explica en la [sección 12.2](#122-ciclo-entre-beans-de-spring-y-restauración-de-contextloads).
 
 ## 6. Paso 3 — Refactorización del *Long Method*
 
 ### 6.1. Diagnóstico
 
-`actualizarInventario(Long, int, String)` abarcaba las líneas 18 a 60 (≈ **41 líneas de cuerpo**, contando comentarios y líneas vacías) y mezclaba **5 responsabilidades** en un único bloque:
+`actualizarInventario(Long, int, String)` abarcaba ≈ **41 líneas de cuerpo** (contando comentarios y líneas vacías) y mezclaba **5 responsabilidades** en un único bloque:
 
 1. Validación de parámetros de entrada.
 2. Búsqueda secuencial del producto.
@@ -116,13 +120,13 @@ public String actualizarInventario(Long productoId, int cantidad, String tipoMov
 
     int nuevoStock = aplicarMovimientoStock(producto, cantidad, tipoMovimiento);
     registrarMovimiento(producto, cantidad, tipoMovimiento, nuevoStock);
-    return generarRespuestaActualizacion(producto, nuevoStock);
+    return evaluarReorden(producto, nuevoStock);
 }
 ```
 
 ![InventarioService refactorizado](capturas/06-despues-inventario-service.png)
 
-**Métodos privados extraídos (7), cada uno con una única responsabilidad:**
+**Métodos privados extraídos (8), cada uno con una única responsabilidad:**
 
 | Método | Responsabilidad |
 | :--- | :--- |
@@ -132,19 +136,24 @@ public String actualizarInventario(Long productoId, int cantidad, String tipoMov
 | `aplicarMovimientoStock(Producto, int, String)` | Calcula y actualiza el nuevo stock |
 | `calcularCantidadReorden(Producto, int)` | Calcula las unidades a reordenar si cae bajo el mínimo |
 | `registrarMovimiento(Producto, int, String, int)` | Trazabilidad de auditoría |
-| `generarRespuestaActualizacion(Producto, int)` | Decide si hay alerta de reorden y formatea el código de retorno |
+| `evaluarReorden(Producto, int)` | Decide si hay reorden y formatea el código de retorno |
+| `alertarBajoStock(Producto, int)` | Notifica a `NotificadorBajoStock` e imprime la alerta |
+
+> En la Parte 2, el antiguo `generarRespuestaActualizacion` se dividió en `evaluarReorden` y `alertarBajoStock`: además de formatear la respuesta notificaba e imprimía, un efecto secundario que su nombre no revelaba. Las 6 pruebas de `InventarioServiceTest` siguieron en verde sin modificarse.
 
 ### 6.3. Evidencia antes / después
 
 | Métrica | Antes | Después | Mejora |
 | :--- | :--- | :--- | :--- |
-| Líneas de cuerpo de `actualizarInventario()` | ≈ 41 (líneas 19–59) | **8** (líneas 22–29) | ≈ 80 % menos |
-| Responsabilidades en `actualizarInventario()` | 5 mezcladas | **1** (orquestación) | Separadas en 7 métodos cohesivos (SRP) |
+| Líneas de cuerpo de `actualizarInventario()` | ≈ 41 | **8** (sin contar firma ni llave de cierre) | ≈ 80 % menos |
+| Responsabilidades en `actualizarInventario()` | 5 mezcladas | **1** (orquestación) | Separadas en 8 métodos cohesivos (SRP) |
 | Complejidad ciclomática de `actualizarInventario()` ¹ | 9 (12 contando `&&`/`\|\|`) | **4** (solo guard clauses planas) | Ramificación anidada eliminada |
 | Complejidad ciclomática máxima de los métodos extraídos ¹ | — | ≤ 3 | Cada método es trivial de leer y probar |
 | `InventarioServiceTest` | 6 en verde | **6 en verde, sin modificar** | Comportamiento observable preservado |
 
 ¹ Convención: CC = 1 + número de `if`, `for`, `?:` y `case`. La complejidad total no desaparece: **se reparte** en métodos pequeños, y la del método público baja de 9 a 4.
+
+> **Cambio de comportamiento intencional (fuera de la red de seguridad):** con `tipoMovimiento == null` el código original lanzaba `NullPointerException` (`!tipoMovimiento.equals("ENTRADA")`). El refactorizado compara con la constante a la izquierda (`MOVIMIENTO_ENTRADA.equals(tipoMovimiento)`) y devuelve `ERROR_DATOS_INVALIDOS`. Ninguna prueba de caracterización cubría ese caso; se deja documentado como corrección deliberada.
 
 ### 6.4. Decisión de diseño 1 — Reorden: ¿método privado o clase `CalculadoraReorden`?
 
@@ -306,12 +315,30 @@ private NotificadorBajoStock notificador;
 public void setNotificador(NotificadorBajoStock notificador) { this.notificador = notificador; }
 
 // reportes/ReporteBajoStockService.java
-public class ReporteBajoStockService implements NotificadorBajoStock { ... }
+@Service
+public class ReporteBajoStockService implements NotificadorBajoStock {
+    public ReporteBajoStockService(@Lazy InventarioService inventarioService) { ... }
+    @Override public void notificar(Producto producto, int cantidadReorden) { ... }
+}
 ```
 
 ![Código tras aplicar DIP](capturas/16-parte2-dip-codigo.png)
 
+Además de la regla de ciclos, se agregó una segunda prueba que verifica de forma explícita la dirección permitida (solo clases de producción):
+
+```java
+noClasses().that().resideInAPackage("..inventario..")
+        .should().dependOnClassesThat().resideInAPackage("..reportes..")
+        .check(clasesProduccion);
+```
+
 `ArquitecturaPaquetesTest` pasa en verde:
+
+```text
+$ mvn test -Dtest=ArquitecturaPaquetesTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
 
 ![ArchUnit en verde](capturas/15-parte2-archunit-verde.png)
 
@@ -344,17 +371,50 @@ Todas las flechas **entre paquetes** apuntan en una sola dirección: `reportes �
   2. **Ubicarla en `reportes` no rompería el ciclo.** `InventarioService` tendría que seguir importando `reportes.NotificadorBajoStock` y `reportes` seguiría importando `InventarioService` y `Producto`. La unidad de acoplamiento entre paquetes son los tipos importados, así que el ciclo detectado por ArchUnit seguiría vivo.
   3. **Inversión real de la flecha.** Con la interfaz en `inventario`, el dominio declara qué necesita sin saber quién lo implementa, y `reportes` implementa ese contrato dependiendo de `inventario` en la única dirección permitida.
 
+### 12.2. Ciclo entre beans de Spring y restauración de `contextLoads`
+
+Al integrar `reportes` (commit `3493099`) se eliminó `RefactoringU11ApplicationTests` porque el contexto de Spring dejó de arrancar. Además del ciclo entre **paquetes** existía un ciclo entre **beans**:
+
+```text
+InventarioService --(setter)--> NotificadorBajoStock = ReporteBajoStockService --(constructor)--> InventarioService
+```
+
+Spring Boot rechaza las referencias circulares por defecto (desde la versión 2.6), y `@Autowired(required = false)` no lo evita: solo cubre el caso en que el bean no existe. La inversión de dependencias resolvió el ciclo de *compilación* (el que detecta ArchUnit), pero no el de *inyección*, porque `ReporteBajoStockService` sigue necesitando a `InventarioService` y viceversa en tiempo de ejecución.
+
+**Corrección:** `@Lazy` en el parámetro del constructor de `ReporteBajoStockService`. Spring inyecta un proxy de `InventarioService` que se resuelve en el primer uso, de modo que ninguno de los dos beans necesita al otro ya construido. Se eligió poner `@Lazy` en `reportes` y no en `inventario` para que el paquete de dominio no cambie por un detalle de infraestructura.
+
+Luego se restauró `RefactoringU11ApplicationTests` (sin cambios respecto a su versión original) y se agregaron pruebas que verifican que la notificación realmente llega a `reportes`:
+
+| Clase de prueba | Paquete | Qué verifica |
+| :--- | :--- | :--- |
+| `RefactoringU11ApplicationTests` | raíz | El contexto de Spring arranca (sin ciclo de beans) |
+| `NotificacionBajoStockIntegracionTest` | raíz | Con el contexto de Spring, una salida bajo el mínimo llega al reporte |
+| `ReporteBajoStockServiceTest` | `reportes` | Sin Spring: `notificar` registra la alerta y el reporte vacío se informa correctamente |
+
+> La prueba de integración vive en el paquete raíz a propósito: ArchUnit también analiza las clases de test, y una prueba ubicada en `inventario` que importe `reportes` volvería a crear el ciclo.
+
+**Lección:** ArchUnit detecta ciclos de dependencias en el código compilado; los ciclos de inyección solo los revela una prueba que levante el contexto.
+
 ## 13. Paso 4 — Las pruebas de la Parte 1 siguen en verde, sin modificarse
 
 Con el ciclo resuelto se ejecutó la suite completa **sin cambiar una sola línea** de `InventarioServiceTest`, `ClasificadorProductoTest` ni `EtiquetadoProductoTest`:
 
 | Clase de prueba | Tests | Resultado |
 | :--- | :---: | :---: |
-| `ArquitecturaPaquetesTest` | 1 | verde |
+| `ArquitecturaPaquetesTest` | 2 | verde |
 | `ClasificadorProductoTest` | 4 | verde |
 | `EtiquetadoProductoTest` | 4 | verde |
 | `InventarioServiceTest` | 6 | verde |
-| **Total** | **15** | `Failures: 0, Errors: 0` · `BUILD SUCCESS` |
+| `RefactoringU11ApplicationTests` | 1 | verde |
+| `NotificacionBajoStockIntegracionTest` | 1 | verde |
+| `ReporteBajoStockServiceTest` | 2 | verde |
+| **Total** | **20** | `Failures: 0, Errors: 0` · `BUILD SUCCESS` |
+
+```text
+$ mvn test
+[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
 
 ![Suite completa en verde (terminal)](capturas/17-parte2-suite-completa-verde.png)
 ![Suite completa en verde (Test Runner del IDE)](capturas/18-parte2-suite-ide-verde.png)
@@ -374,21 +434,24 @@ Con el ciclo resuelto se ejecutó la suite completa **sin cambiar una sola líne
 
 | Criterio | Estado | Evidencia |
 | :--- | :---: | :--- |
-| *Long Method* eliminado (≤ 10 líneas, responsabilidades separadas) | Cumplido | Captura 06 |
-| *Switch* duplicado eliminado, firmas públicas intactas | Cumplido | Captura 08 |
+| *Long Method* eliminado (≤ 10 líneas, responsabilidades separadas) | Cumplido | Sección 6, captura 06 |
+| *Switch* duplicado eliminado, firmas públicas intactas | Cumplido | Sección 7, captura 08 |
 | Pruebas escritas **antes** de refactorizar y sin modificar | Cumplido | Capturas 04, 07, 09, 17 |
-| Prueba de arquitectura en rojo antes de la corrección | Cumplido | Captura 13 |
-| Prueba de arquitectura en verde después | Cumplido | Capturas 15, 17 |
-| `inventario` no importa ninguna clase de `reportes` | Cumplido | Captura 16 (imports de `InventarioService`) |
+| Prueba de arquitectura en rojo antes de la corrección | Cumplido | Sección 11, captura 13 |
+| Prueba de arquitectura en verde después | Cumplido | Sección 12, capturas 15, 17 |
+| `inventario` no importa ninguna clase de `reportes` | Cumplido | Regla `noClasses()` de ArchUnit y captura 16 |
+| El contexto de Spring arranca sin ciclo de beans | Cumplido | Sección 12.2, `RefactoringU11ApplicationTests` |
+| La notificación llega de `inventario` a `reportes` | Cumplido | `NotificacionBajoStockIntegracionTest`, `ReporteBajoStockServiceTest` |
 | Decisiones de diseño 1, 2, 3 y 4 documentadas | Cumplido | Secciones 6.4, 7.4, 12.1, 13.1 |
 
 ## Mejoras identificadas (fuera del alcance del taller)
 
 Quedaron fuera para no mezclar refactorización con cambios de comportamiento, pero son los siguientes pasos naturales:
 
-- **Pruebas faltantes:** `cantidad <= 0`, `productoId == null`, `tipoMovimiento == null`, stock igual al mínimo (frontera de `<`) y verificación de que `NotificadorBajoStock.notificar(...)` se invoca solo cuando corresponde (con una implementación lambda). `ReporteBajoStockService` no tiene pruebas.
+- **Pruebas faltantes en `InventarioService`:** `cantidad <= 0`, `productoId == null`, `tipoMovimiento == null` y stock igual al mínimo (frontera de `<`). No se agregaron a `InventarioServiceTest` para mantener intacta la red de seguridad original.
 - **Salida estándar:** reemplazar `System.out.println` por un *logger* (SLF4J).
 - **Tipos primitivos obsesivos (*Primitive Obsession*):** `tipoMovimiento` como `String` y los códigos de retorno como `String` podrían ser un `enum TipoMovimiento` y un `ResultadoActualizacion`; el dinero como `double` podría ser `BigDecimal`.
+- **Números mágicos en `TipoProducto`:** `0.08`, `0.03` y `2.50` podrían ser constantes con nombre, como ya se hizo con `FACTOR_REORDEN`.
 - **Encapsulación:** `Producto.setStock(int)` es público; operaciones como `aplicarEntrada`/`aplicarSalida` protegerían el invariante de stock no negativo.
-- **Nombre y efectos de `generarRespuestaActualizacion`:** además de formatear el retorno, notifica e imprime. Extraer `notificarBajoStock(...)` dejaría cada método con un solo motivo de cambio.
+- **Lista `movimientos`:** viene del código original y solo se escribe; nunca se consulta. Se conservó para no alterar el comportamiento, pero un método `obtenerMovimientos()` o un logger la harían útil.
 - **`ReporteBajoStockService`:** `alertasRegistradas` crece sin límite y nunca se limpia (un producto repuesto seguiría apareciendo en alertas viejas) y no es seguro ante concurrencia.
