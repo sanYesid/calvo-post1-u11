@@ -73,3 +73,22 @@ Escribir pruebas de caracterización que documenten el comportamiento actual de 
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
+```
+
+
+## Parte 2: Diagnóstico y Resolución de Acoplamiento entre Paquetes
+
+### 1. Diagnóstico del Ciclo de Dependencias con ArchUnit (Paso 2 — Prueba en Rojo)
+
+Al integrar el módulo `reportes` (`ReporteBajoStockService`) e invocarlo directamente desde `InventarioService`, las 14 pruebas de negocio de la Parte 1 continúan pasando en verde, pero se introduce una **dependencia cíclica bidireccional entre paquetes (`inventario <-> reportes`)**:
+
+```mermaid
+graph LR
+    subgraph "ANTES: Dependencia Cíclica (Acoplamiento Bidireccional)"
+        I["Paquete: inventario<br/>(InventarioService, Producto)"]
+        R["Paquete: reportes<br/>(ReporteBajoStockService)"]
+        I -- "importa e invoca a<br/>ReporteBajoStockService" --> R
+        R -- "importa e inyecta a<br/>InventarioService y Producto" --> I
+    end
+
+```
